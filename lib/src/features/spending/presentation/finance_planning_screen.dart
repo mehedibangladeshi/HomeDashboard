@@ -3,6 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:home_management/src/core/data/providers.dart';
 import 'package:home_management/src/core/domain/money.dart';
 import 'package:home_management/src/features/household/domain/household.dart';
+import 'package:uuid/uuid.dart';
+import 'package:home_management/src/core/presentation/managed_routes.dart';
+import 'package:home_management/src/features/spending/presentation/spending_screen.dart';
+import 'package:home_management/src/features/dashboard/presentation/today_screen.dart';
 
 class FinancePlanningScreen extends ConsumerStatefulWidget {
   const FinancePlanningScreen({required this.household, super.key});
@@ -17,6 +21,7 @@ class FinancePlanningScreen extends ConsumerStatefulWidget {
 class _FinancePlanningScreenState extends ConsumerState<FinancePlanningScreen> {
   late Future<
       (
+        List<Map<String, dynamic>>,
         List<Map<String, dynamic>>,
         List<Map<String, dynamic>>,
         List<Map<String, dynamic>>
@@ -34,13 +39,21 @@ class _FinancePlanningScreenState extends ConsumerState<FinancePlanningScreen> {
       repository.categories(widget.household.id),
       repository.budgets(widget.household.id),
       repository.obligations(widget.household.id),
+      ref
+          .read(supabaseProvider)
+          .from('obligation_occurrences')
+          .select('id,title_snapshot,due_at,obligations(expected_amount_minor)')
+          .eq('household_id', widget.household.id)
+          .eq('status', 'scheduled')
+          .order('due_at')
+          .limit(50),
     ).wait;
   }
 
   Future<void> _addBudget(List<Map<String, dynamic>> categories) async {
     final amount = TextEditingController();
     var categoryId = categories.first['id'] as String;
-    final result = await showDialog<(String, int)>(
+    final result = await showManagedDialog<(String, int)>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
@@ -75,9 +88,11 @@ class _FinancePlanningScreenState extends ConsumerState<FinancePlanningScreen> {
                 child: const Text('Cancel')),
             FilledButton(
               onPressed: () {
-                final value = double.tryParse(amount.text);
-                if (value != null && value > 0) {
-                  Navigator.pop(context, (categoryId, (value * 100).round()));
+                try {
+                  Navigator.pop(
+                      context, (categoryId, Money.parseMinor(amount.text)));
+                } on FormatException {
+                  /* Keep the form open for a valid amount. */
                 }
               },
               child: const Text('Save'),
@@ -102,7 +117,8 @@ class _FinancePlanningScreenState extends ConsumerState<FinancePlanningScreen> {
     final amount = TextEditingController();
     var categoryId = categories.first['id'] as String;
     var frequency = 'monthly';
-    final accepted = await showDialog<bool>(
+    var startsOn = DateTime.now();
+    final accepted = await showManagedDialog<bool>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
@@ -151,6 +167,19 @@ class _FinancePlanningScreenState extends ConsumerState<FinancePlanningScreen> {
                       .toList(),
                   onChanged: (value) => setState(() => frequency = value!),
                 ),
+                OutlinedButton(
+                    onPressed: () async {
+                      final value = await showDatePicker(
+                          context: context,
+                          initialDate: startsOn,
+                          firstDate: DateTime.now()
+                              .subtract(const Duration(days: 365)),
+                          lastDate:
+                              DateTime.now().add(const Duration(days: 3650)));
+                      if (value != null) setState(() => startsOn = value);
+                    },
+                    child: Text(
+                        'First due date: ${startsOn.toIso8601String().substring(0, 10)}')),
               ],
             ),
           ),
@@ -166,15 +195,20 @@ class _FinancePlanningScreenState extends ConsumerState<FinancePlanningScreen> {
       ),
     );
     if (accepted == true) {
-      final value = double.tryParse(amount.text);
-      if (title.text.trim().isNotEmpty && value != null && value > 0) {
+      int? value;
+      try {
+        value = Money.parseMinor(amount.text);
+      } on FormatException {
+        value = null;
+      }
+      if (title.text.trim().isNotEmpty && value != null) {
         await ref.read(spendingRepositoryProvider).createObligation(
               householdId: widget.household.id,
               title: title.text.trim(),
-              expectedAmountMinor: (value * 100).round(),
+              expectedAmountMinor: value,
               categoryId: categoryId,
               frequency: frequency,
-              startsOn: DateTime.now(),
+              startsOn: startsOn,
             );
         setState(_reload);
       }
@@ -189,10 +223,16 @@ class _FinancePlanningScreenState extends ConsumerState<FinancePlanningScreen> {
         body: FutureBuilder(
           future: _data,
           builder: (context, snapshot) {
+            if (snapshot.hasError) {
+              return Center(
+                  child: TextButton(
+                      onPressed: () => setState(_reload),
+                      child: const Text('Reload planning')));
+            }
             if (!snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
-            final (categories, budgets, obligations) = snapshot.data!;
+            final (categories, budgets, obligations, dues) = snapshot.data!;
             return ListView(
               padding: const EdgeInsets.all(16),
               children: [
@@ -243,9 +283,103 @@ class _FinancePlanningScreenState extends ConsumerState<FinancePlanningScreen> {
                                 .format()),
                       ),
                     )),
+                const SizedBox(height: 24),
+                Text('Upcoming payments',
+                    style: Theme.of(context).textTheme.titleLarge),
+                if (dues.isEmpty) const Text('No unpaid occurrences.'),
+                ...dues.map((due) => Card.filled(
+                        child: ListTile(
+                      title: Text(due['title_snapshot'] as String),
+                      subtitle: Text(DateTime.parse(due['due_at'] as String)
+                          .toLocal()
+                          .toString()),
+                      trailing: TextButton(
+                          onPressed: () => _pay(due),
+                          child: const Text('Record payment')),
+                    ))),
               ],
             );
           },
         ),
+      );
+
+  Future<void> _pay(Map<String, dynamic> due) async {
+    final definition = due['obligations'] as Map<String, dynamic>?;
+    final value = await showDialog<int>(
+        context: context,
+        builder: (_) => _PaymentDialog(
+            expectedMinor: definition?['expected_amount_minor'] as int?));
+    if (value == null) return;
+    try {
+      final client = ref.read(supabaseProvider);
+      await client.rpc<String>('mark_obligation_paid', params: {
+        'p_occurrence_id': due['id'],
+        'p_amount_minor': value,
+        'p_paid_at': DateTime.now().toUtc().toIso8601String(),
+        'p_payer_user_id': client.auth.currentUser!.id,
+        'p_payment_source_id': null,
+        'p_client_mutation_id': const Uuid().v4(),
+      });
+      ref.invalidate(recentExpensesProvider(widget.household.id));
+      ref.invalidate(dashboardProvider(widget.household.id));
+      if (mounted) setState(_reload);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+            content: Text('Payment could not be recorded. Please retry.')));
+      }
+    }
+  }
+}
+
+class _PaymentDialog extends StatefulWidget {
+  const _PaymentDialog({this.expectedMinor});
+  final int? expectedMinor;
+  @override
+  State<_PaymentDialog> createState() => _PaymentDialogState();
+}
+
+class _PaymentDialogState extends State<_PaymentDialog> {
+  late final controller = TextEditingController(
+      text: widget.expectedMinor == null
+          ? ''
+          : (widget.expectedMinor! / 100).toStringAsFixed(2));
+  final form = GlobalKey<FormState>();
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+        title: const Text('Record actual payment'),
+        content: Form(
+            key: form,
+            child: TextFormField(
+                controller: controller,
+                keyboardType:
+                    const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Amount paid'),
+                validator: (value) {
+                  try {
+                    Money.parseMinor(value ?? '');
+                    return null;
+                  } on FormatException {
+                    return 'Enter a positive amount';
+                  }
+                })),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () {
+                if (form.currentState!.validate()) {
+                  Navigator.pop(context, Money.parseMinor(controller.text));
+                }
+              },
+              child: const Text('Record payment'))
+        ],
       );
 }

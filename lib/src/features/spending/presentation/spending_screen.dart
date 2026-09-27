@@ -5,8 +5,10 @@ import 'package:home_management/src/core/domain/money.dart';
 import 'package:home_management/src/features/household/domain/household.dart';
 import 'package:home_management/src/features/spending/domain/expense.dart';
 import 'package:image_picker/image_picker.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
+import 'package:home_management/src/features/dashboard/presentation/today_screen.dart';
+import 'expense_detail_screen.dart';
+import 'package:home_management/src/core/presentation/managed_routes.dart';
 
 final recentExpensesProvider =
     FutureProvider.family<List<Map<String, dynamic>>, String>((
@@ -64,6 +66,12 @@ class SpendingScreen extends ConsumerWidget {
               child: ListTile(
                 leading: const CircleAvatar(child: Icon(Icons.receipt_long)),
                 title: Text(row['summary'] as String),
+                onTap: () => Navigator.push<void>(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) => ExpenseDetailScreen(
+                            expenseId: row['id'] as String,
+                            household: household))),
                 subtitle: Text(row['status'] as String),
                 trailing: row['status'] == 'pending'
                     ? PopupMenuButton<String>(
@@ -109,7 +117,7 @@ class SpendingScreen extends ConsumerWidget {
 
 Future<String?> _rejectionReason(BuildContext context) async {
   final controller = TextEditingController();
-  final value = await showDialog<String>(
+  final value = await showManagedDialog<String>(
     context: context,
     builder: (context) => AlertDialog(
       title: const Text('Reject submission'),
@@ -138,7 +146,7 @@ Future<String?> _rejectionReason(BuildContext context) async {
   return value;
 }
 
-class _MonthSummary extends StatelessWidget {
+class _MonthSummary extends ConsumerWidget {
   const _MonthSummary({
     required this.household,
     required this.expenses,
@@ -150,14 +158,8 @@ class _MonthSummary extends StatelessWidget {
   final VoidCallback onAnalytics;
 
   @override
-  Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final total = expenses.where((row) {
-      final date = DateTime.parse(row['incurred_at'] as String).toLocal();
-      return row['status'] == 'approved' &&
-          date.year == now.year &&
-          date.month == now.month;
-    }).fold<int>(0, (sum, row) => sum + row['total_minor'] as int);
+  Widget build(BuildContext context, WidgetRef ref) {
+    final summary = ref.watch(dashboardProvider(household.id));
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: Card(
@@ -170,7 +172,13 @@ class _MonthSummary extends StatelessWidget {
               const Text('Spent this month'),
               const SizedBox(height: 6),
               Text(
-                Money(total, household.currencyCode).format(),
+                summary.when(
+                  data: (data) => Money(data['spent_month_minor'] as int,
+                          household.currencyCode)
+                      .format(),
+                  loading: () => 'Loading…',
+                  error: (_, __) => 'Unavailable',
+                ),
                 style: Theme.of(context).textTheme.headlineMedium,
               ),
               const SizedBox(height: 12),
@@ -195,13 +203,14 @@ Future<void> showAnalyticsSheet(
   Household household,
 ) async {
   var period = _AnalyticsPeriod.month;
+  var anchor = DateTime.now();
   await showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
     builder: (context) => StatefulBuilder(
       builder: (context, setState) {
-        final now = DateTime.now();
+        final now = anchor;
         final from = switch (period) {
           _AnalyticsPeriod.day => DateTime(now.year, now.month, now.day),
           _AnalyticsPeriod.week => DateTime(
@@ -266,6 +275,41 @@ Future<void> showAnalyticsSheet(
                         setState(() => period = value.single),
                   ),
                   const SizedBox(height: 24),
+                  Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        IconButton(
+                            tooltip: 'Previous period',
+                            icon: const Icon(Icons.chevron_left),
+                            onPressed: () => setState(() {
+                                  anchor = switch (period) {
+                                    _AnalyticsPeriod.day =>
+                                      anchor.subtract(const Duration(days: 1)),
+                                    _AnalyticsPeriod.week =>
+                                      anchor.subtract(const Duration(days: 7)),
+                                    _AnalyticsPeriod.month =>
+                                      DateTime(anchor.year, anchor.month - 1),
+                                    _AnalyticsPeriod.year =>
+                                      DateTime(anchor.year - 1),
+                                  };
+                                })),
+                        Text(from.toIso8601String().substring(0, 10)),
+                        IconButton(
+                            tooltip: 'Next period',
+                            icon: const Icon(Icons.chevron_right),
+                            onPressed: () => setState(() {
+                                  anchor = switch (period) {
+                                    _AnalyticsPeriod.day =>
+                                      anchor.add(const Duration(days: 1)),
+                                    _AnalyticsPeriod.week =>
+                                      anchor.add(const Duration(days: 7)),
+                                    _AnalyticsPeriod.month =>
+                                      DateTime(anchor.year, anchor.month + 1),
+                                    _AnalyticsPeriod.year =>
+                                      DateTime(anchor.year + 1),
+                                  };
+                                })),
+                      ]),
                   if (snapshot.connectionState == ConnectionState.waiting)
                     const Center(child: CircularProgressIndicator())
                   else if (categoryTotals.isEmpty)
@@ -369,115 +413,151 @@ Future<void> showQuickPurchaseSheet(
   BuildContext context,
   WidgetRef ref,
   Household household,
-) async {
+) =>
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => _QuickPurchaseSheet(household: household),
+    );
+
+class _QuickPurchaseSheet extends ConsumerStatefulWidget {
+  const _QuickPurchaseSheet({required this.household});
+  final Household household;
+  @override
+  ConsumerState<_QuickPurchaseSheet> createState() =>
+      _QuickPurchaseSheetState();
+}
+
+class _QuickPurchaseSheetState extends ConsumerState<_QuickPurchaseSheet> {
   final amount = TextEditingController();
   final item = TextEditingController();
   final formKey = GlobalKey<FormState>();
-  var busy = false;
+  final mutationId = const Uuid().v4();
+  bool busy = false;
   XFile? receipt;
-  await showModalBottomSheet<void>(
-    context: context,
-    isScrollControlled: true,
-    showDragHandle: true,
-    builder: (context) => StatefulBuilder(
-      builder: (context, setSheetState) {
-        Future<void> save() async {
-          if (!formKey.currentState!.validate()) return;
-          final parsed = double.parse(amount.text.trim());
-          final minor = (parsed * 100).round();
-          setSheetState(() => busy = true);
-          try {
-            final userId = Supabase.instance.client.auth.currentUser!.id;
-            final purchase = NewPurchase(
-              clientMutationId: const Uuid().v4(),
-              householdId: household.id,
-              summary: item.text.trim(),
-              totalMinor: minor,
-              currencyCode: household.currencyCode,
-              incurredAt: DateTime.now(),
-              payerUserId: userId,
-              items: [PurchaseItem(name: item.text.trim(), amountMinor: minor)],
-            );
-            final receiptBytes = await receipt?.readAsBytes();
-            if (receiptBytes != null && receiptBytes.length > 1024 * 1024) {
-              throw const FormatException(
-                'Receipt photo is larger than 1 MB. Please retake it.',
-              );
-            }
-            final queue = ref.read(offlineCommandQueueProvider);
-            if (await queue.isOffline) {
-              await queue.enqueuePurchase(
-                purchase,
-                household.role,
-                receiptBytes: receiptBytes,
-              );
-              if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text(
-                      'Saved offline. It will sync when you reconnect.',
-                    ),
-                  ),
-                );
-              }
-            } else {
-              final repository = ref.read(spendingRepositoryProvider);
-              final expenseId =
-                  await repository.createPurchase(purchase, household.role);
-              if (receiptBytes != null) {
-                await repository.attachReceipt(
-                  expenseId,
-                  household.id,
-                  receiptBytes,
-                );
-              }
-            }
-            ref.invalidate(recentExpensesProvider(household.id));
-            if (context.mounted) Navigator.pop(context);
-          } catch (error) {
-            if (context.mounted) {
-              ScaffoldMessenger.of(
-                context,
-              ).showSnackBar(SnackBar(content: Text('Could not save: $error')));
-            }
-          } finally {
-            if (context.mounted) setSheetState(() => busy = false);
-          }
-        }
+  String? categoryId;
+  List<Map<String, dynamic>> categories = [];
 
-        return Padding(
-          padding: EdgeInsets.fromLTRB(
-            24,
-            0,
-            24,
-            MediaQuery.viewInsetsOf(context).bottom + 24,
-          ),
-          child: Form(
+  @override
+  void initState() {
+    super.initState();
+    _loadCategories();
+  }
+
+  Future<void> _loadCategories() async {
+    try {
+      final values = await ref
+          .read(spendingRepositoryProvider)
+          .categories(widget.household.id);
+      if (mounted) setState(() => categories = values);
+    } catch (_) {
+      // Category selection is optional; offline quick entry still works.
+    }
+  }
+
+  @override
+  void dispose() {
+    amount.dispose();
+    item.dispose();
+    super.dispose();
+  }
+
+  Future<void> save() async {
+    if (busy || !formKey.currentState!.validate()) return;
+    setState(() => busy = true);
+    try {
+      final household = widget.household;
+      final minor = Money.parseMinor(amount.text);
+      final purchase = NewPurchase(
+        clientMutationId: mutationId,
+        householdId: household.id,
+        summary: item.text.trim(),
+        totalMinor: minor,
+        currencyCode: household.currencyCode,
+        incurredAt: DateTime.now(),
+        payerUserId: ref.read(supabaseProvider).auth.currentUser!.id,
+        categoryId: categoryId,
+        items: [PurchaseItem(name: item.text.trim(), amountMinor: minor)],
+      );
+      final receiptBytes = await receipt?.readAsBytes();
+      if (receiptBytes != null && receiptBytes.length > 1024 * 1024) {
+        throw const FormatException(
+            'Receipt photo exceeds 1 MB. Please retake it.');
+      }
+      final queue = ref.read(offlineCommandQueueProvider);
+      await queue.enqueuePurchase(purchase, household.role,
+          receiptBytes: receiptBytes);
+      if (!await queue.isOffline) {
+        await queue.synchronize();
+      }
+      ref.invalidate(recentExpensesProvider(household.id));
+      ref.invalidate(dashboardProvider(household.id));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content:
+              Text('Saved. Pending work syncs automatically when connected.'),
+        ));
+        Navigator.pop(context);
+      }
+    } catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not save: $error')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> pickReceipt() async {
+    try {
+      final selected = await ImagePicker().pickImage(
+        source: ImageSource.camera,
+        imageQuality: 55,
+        maxWidth: 1400,
+        maxHeight: 1400,
+      );
+      if (selected != null && mounted) setState(() => receipt = selected);
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+              content: Text('Camera unavailable. Check camera permissions.')),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => SingleChildScrollView(
+        padding: EdgeInsets.fromLTRB(
+            24, 0, 24, MediaQuery.viewInsetsOf(context).bottom + 24),
+        child: Form(
             key: formKey,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Quick purchase',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+                Text('Quick purchase',
+                    style: Theme.of(context).textTheme.titleLarge),
                 const SizedBox(height: 20),
                 TextFormField(
                   controller: amount,
                   autofocus: true,
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
+                  keyboardType:
+                      const TextInputType.numberWithOptions(decimal: true),
                   decoration: InputDecoration(
-                    labelText: 'Amount (${household.currencyCode})',
-                    prefixIcon: const Icon(Icons.payments_outlined),
-                  ),
+                      labelText: 'Amount (${widget.household.currencyCode})',
+                      prefixIcon: const Icon(Icons.payments_outlined)),
                   validator: (value) {
-                    final parsed = double.tryParse(value?.trim() ?? '');
-                    return parsed == null || parsed <= 0
-                        ? 'Enter a positive amount'
-                        : null;
+                    try {
+                      Money.parseMinor(value ?? '');
+                      return null;
+                    } on FormatException {
+                      return 'Enter a positive amount with up to two decimals';
+                    }
                   },
                 ),
                 const SizedBox(height: 12),
@@ -485,55 +565,48 @@ Future<void> showQuickPurchaseSheet(
                   controller: item,
                   textCapitalization: TextCapitalization.sentences,
                   decoration: const InputDecoration(
-                    labelText: 'What did you buy?',
-                    prefixIcon: Icon(Icons.shopping_basket_outlined),
-                  ),
+                      labelText: 'What did you buy?',
+                      prefixIcon: Icon(Icons.shopping_basket_outlined)),
                   validator: (value) => value == null || value.trim().isEmpty
                       ? 'Enter an item or short summary'
                       : null,
                   onFieldSubmitted: (_) => save(),
                 ),
+                if (categories.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  DropdownButtonFormField<String>(
+                    decoration:
+                        const InputDecoration(labelText: 'Category (optional)'),
+                    items: categories
+                        .map((category) => DropdownMenuItem(
+                              value: category['id'] as String,
+                              child: Text(category['name'] as String),
+                            ))
+                        .toList(),
+                    onChanged: (value) => categoryId = value,
+                  ),
+                ],
                 const SizedBox(height: 12),
                 OutlinedButton.icon(
-                  onPressed: busy
-                      ? null
-                      : () async {
-                          final selected = await ImagePicker().pickImage(
-                            source: ImageSource.camera,
-                            imageQuality: 55,
-                            maxWidth: 1400,
-                            maxHeight: 1400,
-                          );
-                          if (selected != null) {
-                            setSheetState(() => receipt = selected);
-                          }
-                        },
-                  icon: Icon(
-                    receipt == null
-                        ? Icons.add_a_photo_outlined
-                        : Icons.check_circle_outline,
-                  ),
-                  label: Text(
-                    receipt == null ? 'Add receipt photo' : 'Receipt attached',
-                  ),
+                  onPressed: busy ? null : pickReceipt,
+                  icon: Icon(receipt == null
+                      ? Icons.add_a_photo_outlined
+                      : Icons.check_circle_outline),
+                  label: Text(receipt == null
+                      ? 'Add receipt photo'
+                      : 'Receipt attached'),
                 ),
                 const SizedBox(height: 20),
                 FilledButton.icon(
                   onPressed: busy ? null : save,
                   icon: const Icon(Icons.check),
-                  label: Text(
-                    household.role.canReadLedger
-                        ? 'Save purchase'
-                        : 'Submit for approval',
-                  ),
+                  label: Text(busy
+                      ? 'Saving…'
+                      : widget.household.role.canReadLedger
+                          ? 'Save purchase'
+                          : 'Submit for approval'),
                 ),
               ],
-            ),
-          ),
-        );
-      },
-    ),
-  );
-  amount.dispose();
-  item.dispose();
+            )),
+      );
 }
