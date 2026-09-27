@@ -19,6 +19,12 @@ defined in [AGENTS.md](AGENTS.md). Every agent must follow them.
 
 ## Local setup
 
+For the credential-free local web workflow, run `node tools/local-web.mjs` and
+follow [local development](docs/local-development.md). It provisions a real
+local Supabase backend and sample family accounts; Google and Firebase remain
+disabled. The phased production roadmap is in
+[implementation roadmap](docs/implementation-roadmap.md).
+
 1. Install the Flutter stable SDK and Supabase CLI.
 2. Copy `.env.example` to `.env` and provide the public Supabase values.
 3. Start Supabase with `supabase start`, then apply migrations with

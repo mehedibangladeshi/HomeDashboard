@@ -1,0 +1,11 @@
+{
+  "name": "home-dashboard-tooling",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "local:web": "node tools/local-web.mjs",
+    "test:web": "node tools/browser-smoke.mjs",
+    "test:commits": "node --test tools/check-commit.test.mjs"
+  },
+  "devDependencies": { "playwright": "1.63.0" }
+}
