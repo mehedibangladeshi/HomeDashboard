@@ -17,16 +17,25 @@ Deno.serve(async (request) => {
   const supabase = serviceClient();
   const { data: oauthState } = await supabase
     .from("google_oauth_states")
-    .select("household_id, user_id, expires_at, used_at")
+    .update({ used_at: new Date().toISOString() })
     .eq("state_hash", stateHash)
-    .single();
+    .is("used_at", null)
+    .gt("expires_at", new Date().toISOString())
+    .select("household_id, user_id, expires_at")
+    .maybeSingle();
   if (
-    !oauthState || oauthState.used_at ||
+    !oauthState ||
     new Date(oauthState.expires_at) < new Date()
   ) {
     return new Response("OAuth state is invalid or expired", { status: 400 });
   }
   try {
+    const { data: membership } = await supabase.from("memberships")
+      .select("role").eq("household_id", oauthState.household_id)
+      .eq("user_id", oauthState.user_id).maybeSingle();
+    if (membership?.role !== "owner") {
+      return new Response("Owner access is no longer available", { status: 403 });
+    }
     const token = await exchangeCode(code);
     if (!token.refresh_token) {
       throw new Error("Google did not return a refresh token");
@@ -35,6 +44,7 @@ Deno.serve(async (request) => {
       .from("households")
       .select("name, time_zone")
       .eq("id", oauthState.household_id)
+      .is("deleted_at", null)
       .single();
     if (!household) throw new Error("Household no longer exists");
     const calendar = await googleRequest<{ id: string }>(
@@ -79,18 +89,15 @@ Deno.serve(async (request) => {
         .toISOString(),
       updated_at: new Date().toISOString(),
     });
-    await supabase.from("google_oauth_states").update({
-      used_at: new Date().toISOString(),
-    }).eq("state_hash", stateHash);
     return new Response(
       "Calendar connected. You can return to Home Management.",
       {
         headers: { "Content-Type": "text/plain; charset=utf-8" },
       },
     );
-  } catch (error) {
+  } catch (_) {
     return new Response(
-      error instanceof Error ? error.message : "Calendar connection failed",
+      "Calendar connection failed. Please reconnect from Settings.",
       { status: 500 },
     );
   }

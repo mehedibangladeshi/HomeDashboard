@@ -64,7 +64,7 @@ export async function exchangeCode(code: string): Promise<TokenResponse> {
     }),
   });
   if (!response.ok) {
-    throw new Error(`Google code exchange failed: ${await response.text()}`);
+    throw new Error(`Google code exchange failed (${response.status})`);
   }
   return response.json();
 }
@@ -83,7 +83,7 @@ export async function refreshAccessToken(
     }),
   });
   if (!response.ok) {
-    throw new Error(`Google token refresh failed: ${await response.text()}`);
+    throw new Error(`Google token refresh failed (${response.status})`);
   }
   return (await response.json()).access_token;
 }
@@ -106,8 +106,7 @@ export async function googleRequest<T>(
   );
   if (!response.ok) {
     const error = new Error(
-      `Google Calendar request failed (${response.status}): ${await response
-        .text()}`,
+      `Google Calendar request failed (${response.status})`,
     );
     Object.assign(error, { status: response.status });
     throw error;

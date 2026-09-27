@@ -35,7 +35,8 @@ Deno.serve(async (request) => {
     return json({ error: "Method not allowed" }, 405);
   }
   const cronSecret = Deno.env.get("CRON_SECRET");
-  if (cronSecret && request.headers.get("x-cron-secret") !== cronSecret) {
+  if (!cronSecret) return json({ error: "Reminder worker is not configured" }, 503);
+  if (request.headers.get("x-cron-secret") !== cronSecret) {
     return json({ error: "Unauthorized" }, 401);
   }
   const supabase = serviceClient();
@@ -54,7 +55,7 @@ Deno.serve(async (request) => {
       await Promise.all([
         supabase.from("profiles").select("quiet_hours_start, quiet_hours_end")
           .eq("user_id", notification.user_id).maybeSingle(),
-        supabase.from("households").select("time_zone").eq(
+        supabase.from("households").select("time_zone").is("deleted_at", null).eq(
           "id",
           notification.household_id,
         ).single(),
@@ -63,6 +64,7 @@ Deno.serve(async (request) => {
           notification.user_id,
         ),
       ]);
+    if (!household) continue;
     if (
       isQuiet(
         profile?.quiet_hours_start ?? null,

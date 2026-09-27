@@ -79,7 +79,7 @@ async function appEventPayload(
   const start = new Date(data.due_at);
   return {
     status: data.status === "cancelled" ? "cancelled" : "confirmed",
-    summary: `${data.title_snapshot} due`,
+    summary: "Household payment due",
     description:
       "Payment details are available only to household Owners and Managers in Home Management.",
     start: googleDateTime(start.toISOString()),
@@ -175,12 +175,22 @@ async function applyGoogleEvent(
     .eq("household_id", householdId)
     .eq("google_event_id", event.id)
     .maybeSingle();
-  const privateData = event.extendedProperties?.private ?? {};
-  const entityType = existing?.entity_type ?? privateData.hm_entity_type;
-  const entityId = existing?.entity_id ?? privateData.hm_entity_id;
+  // Never trust Google event metadata as an authority to address app records.
+  const entityType = existing?.entity_type;
+  const entityId = existing?.entity_id;
 
   if (event.status === "cancelled") {
     if (!existing) return;
+    if (entityType !== "household_event") {
+      // Deleting a calendar mirror cannot cancel a chore or a payment obligation.
+      await supabase.from("calendar_mappings").delete().eq("id", existing.id)
+        .eq("household_id", householdId);
+      await supabase.from("calendar_outbox").upsert({
+        household_id: householdId, entity_type: entityType, entity_id: entityId,
+        operation: "upsert", available_at: new Date().toISOString(), attempts: 0,
+      }, { onConflict: "household_id,entity_type,entity_id" });
+      return;
+    }
     const table = entityType === "household_event"
       ? "household_events"
       : entityType === "chore_occurrence"
@@ -189,7 +199,7 @@ async function applyGoogleEvent(
     await supabase.from(table).update({
       status: "cancelled",
       updated_at: new Date().toISOString(),
-    }).eq("id", entityId);
+    }).eq("id", entityId).eq("household_id", householdId);
     await supabase.from("calendar_outbox").delete().eq(
       "household_id",
       householdId,
@@ -212,7 +222,7 @@ async function applyGoogleEvent(
         ends_at: new Date(endsAt ?? new Date(startsAt).getTime() + 3600_000)
           .toISOString(),
         updated_at: new Date().toISOString(),
-      }).eq("id", entityId);
+      }).eq("id", entityId).eq("household_id", householdId);
     } else {
       const table = entityType === "chore_occurrence"
         ? "chore_occurrences"
@@ -220,7 +230,7 @@ async function applyGoogleEvent(
       await supabase.from(table).update({
         due_at: new Date(startsAt).toISOString(),
         updated_at: new Date().toISOString(),
-      }).eq("id", entityId);
+      }).eq("id", entityId).eq("household_id", householdId);
     }
     await supabase.from("calendar_mappings").upsert({
       household_id: householdId,
@@ -319,6 +329,9 @@ async function pullGoogle(
 
 async function synchronize(connection: Connection) {
   const supabase = serviceClient();
+  const { data: household } = await supabase.from("households").select("id")
+    .eq("id", connection.household_id).is("deleted_at", null).maybeSingle();
+  if (!household) return;
   const token = await refreshAccessToken(connection.encrypted_refresh_token);
   await pushOutbox(supabase, connection, token);
   await pullGoogle(supabase, connection, token);
