@@ -1,0 +1,32 @@
+name: home_management
+description: Shared household spending, chores, reminders, and calendar.
+publish_to: none
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  connectivity_plus: ^7.3.1
+  cupertino_icons: ^1.0.8
+  firebase_core: ^4.15.0
+  firebase_messaging: ^16.7.0
+  flutter_riverpod: ^3.4.3
+  image_picker: ^1.1.2
+  intl: ^0.20.3
+  path_provider: ^2.1.4
+  shared_preferences: ^2.3.2
+  supabase_flutter: ^2.8.0
+  uuid: ^4.5.1
+  url_launcher: ^6.3.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  mocktail: ^1.0.4
+
+flutter:
+  uses-material-design: true
