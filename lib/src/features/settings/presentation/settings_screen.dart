@@ -272,8 +272,11 @@ class SettingsScreen extends ConsumerWidget {
                 child: Icon(Icons.calendar_month_outlined),
               ),
               title: const Text('Connect Google Calendar'),
-              subtitle: const Text('Dedicated two-way household calendar'),
-              onTap: household.role.canGovernHousehold
+              subtitle: Text(ref.watch(appConfigProvider).calendarEnabled
+                  ? 'Dedicated two-way household calendar'
+                  : 'Not connected in this environment'),
+              onTap: household.role.canGovernHousehold &&
+                      ref.watch(appConfigProvider).calendarEnabled
                   ? () => _connectCalendar(context, ref)
                   : null,
             ),

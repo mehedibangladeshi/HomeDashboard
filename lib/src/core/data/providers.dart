@@ -7,6 +7,11 @@ import 'package:home_management/src/features/spending/data/spending_repository.d
 import 'package:home_management/src/core/offline/offline_command_queue.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:home_management/src/core/config/app_config.dart';
+
+final appConfigProvider = Provider<AppConfig>(
+  (ref) => AppConfig.fromEnvironment(),
+);
 
 final supabaseProvider = Provider<SupabaseClient>(
   (ref) => Supabase.instance.client,

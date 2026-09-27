@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:home_management/src/core/data/providers.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -27,7 +28,8 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
     try {
       await ref.read(supabaseProvider).auth.signInWithOtp(
             email: email,
-            emailRedirectTo: 'io.homemanagement.app://login-callback',
+            emailRedirectTo:
+                ref.read(appConfigProvider).authRedirect(isWeb: kIsWeb),
           );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -47,9 +49,10 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
   }
 
   Future<void> _google() async {
+    if (!ref.read(appConfigProvider).googleSignInEnabled) return;
     await ref.read(supabaseProvider).auth.signInWithOAuth(
           OAuthProvider.google,
-          redirectTo: 'io.homemanagement.app://login-callback',
+          redirectTo: ref.read(appConfigProvider).authRedirect(isWeb: kIsWeb),
           authScreenLaunchMode: LaunchMode.externalApplication,
         );
   }
@@ -82,24 +85,26 @@ class _SignInScreenState extends ConsumerState<SignInScreen> {
                       textAlign: TextAlign.center,
                     ),
                     const SizedBox(height: 32),
-                    FilledButton.icon(
-                      onPressed: _busy ? null : _google,
-                      icon: const Icon(Icons.login),
-                      label: const Text('Continue with Google'),
-                    ),
-                    const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 20),
-                      child: Row(
-                        children: [
-                          Expanded(child: Divider()),
-                          Padding(
-                            padding: EdgeInsets.symmetric(horizontal: 12),
-                            child: Text('or'),
-                          ),
-                          Expanded(child: Divider()),
-                        ],
+                    if (ref.watch(appConfigProvider).googleSignInEnabled) ...[
+                      FilledButton.icon(
+                        onPressed: _busy ? null : _google,
+                        icon: const Icon(Icons.login),
+                        label: const Text('Continue with Google'),
                       ),
-                    ),
+                      const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 20),
+                        child: Row(
+                          children: [
+                            Expanded(child: Divider()),
+                            Padding(
+                              padding: EdgeInsets.symmetric(horizontal: 12),
+                              child: Text('or'),
+                            ),
+                            Expanded(child: Divider()),
+                          ],
+                        ),
+                      ),
+                    ],
                     TextField(
                       controller: _emailController,
                       keyboardType: TextInputType.emailAddress,

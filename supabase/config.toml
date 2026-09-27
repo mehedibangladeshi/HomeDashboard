@@ -18,7 +18,7 @@ port = 54323
 [auth]
 enabled = true
 site_url = "http://localhost:3000"
-additional_redirect_urls = ["io.homemanagement.app://login-callback"]
+additional_redirect_urls = ["http://localhost:3000", "http://localhost:3000/**", "io.homemanagement.app://login-callback"]
 jwt_expiry = 3600
 enable_signup = true
 
