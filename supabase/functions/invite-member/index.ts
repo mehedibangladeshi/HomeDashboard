@@ -33,13 +33,13 @@ Deno.serve(async (request) => {
     expires_at: new Date(Date.now() + 7 * 24 * 60 * 60_000).toISOString(),
   });
   if (insertError) return json({ error: insertError.message }, 400);
-  const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(
-    email,
-    {
-      data: { household_invite_token: token },
-      redirectTo: Deno.env.get("APP_INVITE_REDIRECT_URL"),
-    },
-  );
+  const redirect = new URL(Deno.env.get("APP_INVITE_REDIRECT_URL") ?? "http://localhost:3000");
+  redirect.searchParams.set("invite", token);
+  // OTP supports both existing and new accounts; membership is accepted after verification.
+  const { error: inviteError } = await client.auth.signInWithOtp({
+    email: String(email).trim().toLowerCase(),
+    options: { shouldCreateUser: true, emailRedirectTo: redirect.toString() },
+  });
   if (inviteError) return json({ error: inviteError.message }, 400);
-  return json({ invited: true });
+  return json({ invited: true, invitationToken: token });
 });
