@@ -6,6 +6,8 @@ import 'package:home_management/src/features/dashboard/presentation/today_screen
 import 'package:home_management/src/features/household/domain/household.dart';
 import 'package:home_management/src/features/settings/presentation/settings_screen.dart';
 import 'package:home_management/src/features/spending/presentation/spending_screen.dart';
+import 'package:home_management/src/core/offline/pending_sync_bar.dart';
+import 'package:home_management/src/features/notifications/presentation/notification_screen.dart';
 
 class HomeShell extends ConsumerStatefulWidget {
   const HomeShell({required this.household, super.key});
@@ -30,8 +32,17 @@ class _HomeShellState extends ConsumerState<HomeShell> {
     ];
     const titles = ['Today', 'Spending', 'Chores', 'Calendar', 'More'];
     return Scaffold(
-      appBar: AppBar(title: Text(titles[_index])),
-      body: IndexedStack(index: _index, children: screens),
+      appBar: AppBar(title: Text(titles[_index]), actions: [
+        IconButton(
+            tooltip: 'Notifications',
+            icon: const Icon(Icons.notifications_outlined),
+            onPressed: () => Navigator.push<void>(context,
+                MaterialPageRoute(builder: (_) => const NotificationScreen()))),
+      ]),
+      body: Column(children: [
+        PendingSyncBar(householdId: widget.household.id),
+        Expanded(child: IndexedStack(index: _index, children: screens)),
+      ]),
       floatingActionButton: switch (_index) {
         1 => FloatingActionButton.extended(
             onPressed: () =>

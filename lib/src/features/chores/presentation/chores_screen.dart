@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:home_management/src/core/presentation/managed_routes.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:home_management/src/core/data/providers.dart';
 import 'package:home_management/src/features/chores/domain/chore.dart';
@@ -57,25 +58,62 @@ class ChoresScreen extends ConsumerWidget {
                       subtitle: Text(
                         '${item.isOverdue ? 'Overdue · ' : ''}${DateFormat.MMMEd().add_jm().format(item.dueAt)}',
                       ),
-                      secondary: CircleAvatar(
-                        child: Icon(
-                          item.isComplete
-                              ? Icons.celebration
-                              : Icons.cleaning_services,
-                        ),
-                      ),
-                      onChanged: item.isComplete
+                      secondary: household.role.canOperateHousehold
+                          ? PopupMenuButton<String>(
+                              onSelected: (value) async {
+                                try {
+                                  if (value == 'edit') {
+                                    await showCreateChoreSheet(
+                                        context, ref, household,
+                                        choreId: item.choreId);
+                                  } else {
+                                    await ref.read(supabaseProvider).rpc<void>(
+                                        'cancel_chore',
+                                        params: {'p_chore_id': item.choreId});
+                                    ref.invalidate(
+                                        choreOccurrencesProvider(household.id));
+                                  }
+                                } catch (_) {
+                                  if (context.mounted) {
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(
+                                            content: Text(
+                                                'Could not change this chore. Please reload.')));
+                                  }
+                                }
+                              },
+                              itemBuilder: (_) => const [
+                                PopupMenuItem(
+                                    value: 'edit', child: Text('Edit chore')),
+                                PopupMenuItem(
+                                    value: 'cancel',
+                                    child: Text('Cancel chore'))
+                              ],
+                            )
+                          : CircleAvatar(
+                              child: Icon(
+                                item.isComplete
+                                    ? Icons.celebration
+                                    : Icons.cleaning_services,
+                              ),
+                            ),
+                      onChanged: item.isComplete ||
+                              (!household.role.canOperateHousehold &&
+                                  item.assigneeUserId !=
+                                      ref
+                                          .read(supabaseProvider)
+                                          .auth
+                                          .currentUser!
+                                          .id)
                           ? null
                           : (_) async {
                               final queue = ref.read(
                                 offlineCommandQueueProvider,
                               );
-                              if (await queue.isOffline) {
-                                await queue.enqueueChoreCompletion(item.id);
-                              } else {
-                                await ref
-                                    .read(choreRepositoryProvider)
-                                    .complete(item.id);
+                              await queue.enqueueChoreCompletion(
+                                  item.id, household.id);
+                              if (!await queue.isOffline) {
+                                await queue.synchronize();
                               }
                               ref.invalidate(
                                 choreOccurrencesProvider(household.id),
@@ -91,10 +129,8 @@ class ChoresScreen extends ConsumerWidget {
 }
 
 Future<void> showCreateChoreSheet(
-  BuildContext context,
-  WidgetRef ref,
-  Household household,
-) async {
+    BuildContext context, WidgetRef ref, Household household,
+    {String? choreId}) async {
   final title = TextEditingController();
   final members =
       await ref.read(householdRepositoryProvider).members(household.id);
@@ -104,7 +140,20 @@ Future<void> showCreateChoreSheet(
       : Supabase.instance.client.auth.currentUser!.id;
   var frequency = ChoreFrequency.once;
   var due = DateTime.now().add(const Duration(hours: 2));
-  await showModalBottomSheet<void>(
+  if (choreId != null) {
+    final row = await ref
+        .read(supabaseProvider)
+        .from('chores')
+        .select()
+        .eq('id', choreId)
+        .single();
+    title.text = row['title'] as String;
+    assignee = row['assignee_user_id'] as String;
+    frequency = ChoreFrequency.values.byName(row['frequency'] as String);
+    due = DateTime.parse(row['starts_at'] as String).toLocal();
+  }
+  if (!context.mounted) return;
+  await showManagedBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     showDragHandle: true,
@@ -162,8 +211,8 @@ Future<void> showCreateChoreSheet(
                 final date = await showDatePicker(
                   context: context,
                   initialDate: due,
-                  firstDate: DateTime.now().subtract(const Duration(days: 1)),
-                  lastDate: DateTime.now().add(const Duration(days: 730)),
+                  firstDate: DateTime(2000),
+                  lastDate: DateTime(2100),
                 );
                 if (date == null || !context.mounted) return;
                 final time = await showTimePicker(
@@ -189,17 +238,29 @@ Future<void> showCreateChoreSheet(
             FilledButton(
               onPressed: () async {
                 if (title.text.trim().isEmpty) return;
-                await ref.read(choreRepositoryProvider).create(
-                      householdId: household.id,
-                      title: title.text.trim(),
-                      assigneeUserId: assignee,
-                      frequency: frequency,
-                      startsAt: due,
-                    );
+                if (choreId == null) {
+                  await ref.read(choreRepositoryProvider).create(
+                        householdId: household.id,
+                        title: title.text.trim(),
+                        assigneeUserId: assignee,
+                        frequency: frequency,
+                        startsAt: due,
+                      );
+                } else {
+                  await ref
+                      .read(supabaseProvider)
+                      .rpc<void>('edit_chore', params: {
+                    'p_chore_id': choreId,
+                    'p_title': title.text.trim(),
+                    'p_assignee_user_id': assignee,
+                    'p_frequency': frequency.name,
+                    'p_starts_at': due.toUtc().toIso8601String(),
+                  });
+                }
                 ref.invalidate(choreOccurrencesProvider(household.id));
                 if (context.mounted) Navigator.pop(context);
               },
-              child: const Text('Add chore'),
+              child: Text(choreId == null ? 'Add chore' : 'Save changes'),
             ),
           ],
         ),

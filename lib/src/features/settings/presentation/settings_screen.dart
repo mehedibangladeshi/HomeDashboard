@@ -1,4 +1,5 @@
 import 'dart:typed_data';
+import 'package:home_management/src/core/presentation/managed_routes.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -17,7 +18,7 @@ class SettingsScreen extends ConsumerWidget {
   Future<void> _invite(BuildContext context, WidgetRef ref) async {
     final email = TextEditingController();
     var role = HouseholdRole.member;
-    final result = await showDialog<(String, HouseholdRole)>(
+    final result = await showManagedDialog<(String, HouseholdRole)>(
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
@@ -80,6 +81,23 @@ class SettingsScreen extends ConsumerWidget {
       },
     );
     if (context.mounted) {
+      if (response.status == 200 &&
+          response.data is Map &&
+          response.data['invitationToken'] != null) {
+        await showDialog<void>(
+            context: context,
+            builder: (context) => AlertDialog(
+                  title: const Text('Invitation sent'),
+                  content: SelectableText(
+                      'Email sign-in has been sent. If needed, share this code with the invited person:\n${response.data['invitationToken']}'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Done'))
+                  ],
+                ));
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(

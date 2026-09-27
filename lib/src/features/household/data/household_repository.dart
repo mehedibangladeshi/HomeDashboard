@@ -28,6 +28,11 @@ final class SupabaseHouseholdRepository implements HouseholdRepository {
 
   @override
   Future<Household?> current() async {
+    final invitation = Uri.base.queryParameters['invite'];
+    if (invitation != null && invitation.isNotEmpty) {
+      await _client.rpc<String>('accept_household_invitation',
+          params: {'p_token': invitation});
+    }
     final result = await _client.from('my_households').select().maybeSingle();
     return result == null ? null : Household.fromJson(result);
   }
