@@ -26,6 +26,8 @@ disabled. The phased production roadmap is in
 [implementation roadmap](docs/implementation-roadmap.md).
 Current verification evidence and outstanding release gates are recorded in
 [release status](docs/release-status.md).
+The next-session priorities and user feedback are in
+[session handoff](docs/session-handoff.md).
 
 1. Install the Flutter stable SDK and Supabase CLI.
 2. Copy `.env.example` to `.env` and provide the public Supabase values.

@@ -40,9 +40,13 @@ Android/iPhone installation.
 
 ## Remaining gates
 
+User review: the web UI currently feels like a mobile app. A desktop-first
+responsive layout is the next priority; functional browser checks are not
+visual/product acceptance. See session-handoff.md for the next-session plan.
+
 | Area | Still required before declaring completion |
 | --- | --- |
-| Local workflows | Full ledger pagination/search; complete purchase payer/date/note/itemization UX; category budget progress; full three-role browser acceptance |
+| Local workflows | Desktop web layout and responsive acceptance; full ledger pagination/search; complete purchase payer/date/note/itemization UX; category budget progress; full three-role browser acceptance |
 | Integrity/offline | Concurrent ownership stress tests; deletion/purge job suspension coverage; device storage/privacy review; restart/multi-tab lease expiry tests; legacy outbox migration |
 | Staging/production | Actual hostname, DNS, Supabase/Firebase project access, verified SMTP; explicit staged migrations/functions and hosted acceptance |
 | Push | Real FlutterFire configuration, APNs/VAPID, token cleanup, claimed/retryable delivery jobs, quiet hours and physical-device delivery tests |
