@@ -16,6 +16,11 @@ abstract interface class SpendingRepository {
   );
   Future<void> approve(String expenseId);
   Future<void> reject(String expenseId, String reason);
+  Future<Map<String, dynamic>> detail(String expenseId);
+  Future<String> receiptUrl(String path);
+  Future<void> voidExpense(String expenseId, String reason);
+  Future<void> correctExpense(Map<String, dynamic> original, String summary,
+      int amountMinor, String reason);
   Future<List<Map<String, dynamic>>> analytics(
     String householdId,
     DateTime from,
@@ -41,14 +46,47 @@ abstract interface class SpendingRepository {
 }
 
 final class SupabaseSpendingRepository implements SpendingRepository {
-  const SupabaseSpendingRepository(this._client);
+  const SupabaseSpendingRepository(this._client, {this.cacheRole = 'unknown'});
 
   final SupabaseClient _client;
+  final String cacheRole;
+
+  @override
+  Future<Map<String, dynamic>> detail(String expenseId) => _client
+      .from('expenses')
+      .select('*, expense_items(*)')
+      .eq('id', expenseId)
+      .single();
+
+  @override
+  Future<String> receiptUrl(String path) =>
+      _client.storage.from('receipts').createSignedUrl(path, 60);
+
+  @override
+  Future<void> voidExpense(String expenseId, String reason) async {
+    await _client.rpc<void>('void_expense',
+        params: {'p_expense_id': expenseId, 'p_reason': reason});
+  }
+
+  @override
+  Future<void> correctExpense(Map<String, dynamic> original, String summary,
+      int amountMinor, String reason) async {
+    await _client.rpc<int>('correct_expense', params: {
+      'p_expense_id': original['id'],
+      'p_expected_version': original['version'],
+      'p_summary': summary,
+      'p_total_minor': amountMinor,
+      'p_incurred_at': original['incurred_at'],
+      'p_category_id': original['category_id'],
+      'p_payment_source_id': original['payment_source_id'],
+      'p_reason': reason,
+    });
+  }
 
   @override
   Future<List<Map<String, dynamic>>> recent(String householdId) async {
     final cacheKey =
-        'recent_expenses_${householdId}_${_client.auth.currentUser!.id}';
+        'recent_expenses_${householdId}_${_client.auth.currentUser!.id}_$cacheRole';
     final preferences = await SharedPreferences.getInstance();
     try {
       final rows = await _client
@@ -60,7 +98,8 @@ final class SupabaseSpendingRepository implements SpendingRepository {
           .limit(50);
       await preferences.setString(cacheKey, jsonEncode(rows));
       return List<Map<String, dynamic>>.from(rows);
-    } catch (_) {
+    } catch (error) {
+      if (error is PostgrestException || error is AuthException) rethrow;
       final cached = preferences.getString(cacheKey);
       if (cached == null) rethrow;
       return (jsonDecode(cached) as List).cast<Map<String, dynamic>>();
@@ -154,11 +193,11 @@ final class SupabaseSpendingRepository implements SpendingRepository {
     DateTime until,
   ) async {
     final rows = await _client.rpc<List<dynamic>>(
-      'spending_analytics',
+      'spending_analytics_window',
       params: {
         'p_household_id': householdId,
-        'p_from': from.toUtc().toIso8601String(),
-        'p_until': until.toUtc().toIso8601String(),
+        'p_from': from.toIso8601String().substring(0, 10),
+        'p_until': until.toIso8601String().substring(0, 10),
       },
     );
     return rows.cast<Map<String, dynamic>>();

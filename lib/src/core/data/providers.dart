@@ -30,7 +30,9 @@ final householdRepositoryProvider = Provider<HouseholdRepository>(
 );
 
 final spendingRepositoryProvider = Provider<SpendingRepository>(
-  (ref) => SupabaseSpendingRepository(ref.watch(supabaseProvider)),
+  (ref) => SupabaseSpendingRepository(ref.watch(supabaseProvider),
+      cacheRole: ref.watch(currentHouseholdProvider).asData?.value?.role.name ??
+          'unknown'),
 );
 
 final choreRepositoryProvider = Provider<ChoreRepository>(
@@ -45,6 +47,9 @@ final offlineCommandQueueProvider = Provider<OfflineCommandQueue>(
   (ref) => OfflineCommandQueue(
     ref.watch(spendingRepositoryProvider),
     ref.watch(choreRepositoryProvider),
+    currentUserId: () => ref.read(supabaseProvider).auth.currentUser?.id,
+    currentHouseholdId: () async =>
+        (await ref.read(currentHouseholdProvider.future))?.id,
   ),
 );
 

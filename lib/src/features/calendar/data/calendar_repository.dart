@@ -19,7 +19,8 @@ final class SupabaseCalendarRepository implements CalendarRepository {
 
   @override
   Future<List<Map<String, dynamic>>> events(String householdId) async {
-    final cacheKey = 'household_events_$householdId';
+    final cacheKey =
+        'household_events_${householdId}_${_client.auth.currentUser!.id}';
     final preferences = await SharedPreferences.getInstance();
     try {
       final rows = await _client
@@ -38,7 +39,8 @@ final class SupabaseCalendarRepository implements CalendarRepository {
           .limit(100);
       await preferences.setString(cacheKey, jsonEncode(rows));
       return List<Map<String, dynamic>>.from(rows);
-    } catch (_) {
+    } catch (error) {
+      if (error is PostgrestException || error is AuthException) rethrow;
       final cached = preferences.getString(cacheKey);
       if (cached == null) rethrow;
       return (jsonDecode(cached) as List).cast<Map<String, dynamic>>();

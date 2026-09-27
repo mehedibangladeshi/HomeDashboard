@@ -6,6 +6,18 @@ final class Money implements Comparable<Money> {
   final int minorUnits;
   final String currencyCode;
 
+  static int parseMinor(String input) {
+    if (!RegExp(r'^\d{1,12}(\.\d{1,2})?$').hasMatch(input.trim())) {
+      throw const FormatException(
+          'Enter an amount with at most two decimal places.');
+    }
+    final parts = input.trim().split('.');
+    final minor = int.parse(parts.first) * 100 +
+        (parts.length == 2 ? int.parse(parts.last.padRight(2, '0')) : 0);
+    if (minor <= 0) throw const FormatException('Amount must be positive.');
+    return minor;
+  }
+
   Money operator +(Money other) {
     _requireSameCurrency(other);
     return Money(minorUnits + other.minorUnits, currencyCode);

@@ -24,7 +24,8 @@ final class SupabaseChoreRepository implements ChoreRepository {
 
   @override
   Future<List<ChoreOccurrence>> upcoming(String householdId) async {
-    final cacheKey = 'chore_occurrences_$householdId';
+    final cacheKey =
+        'chore_occurrences_${householdId}_${_client.auth.currentUser!.id}';
     final preferences = await SharedPreferences.getInstance();
     List<dynamic> rows;
     try {
@@ -34,10 +35,12 @@ final class SupabaseChoreRepository implements ChoreRepository {
             'id, chore_id, title_snapshot, assignee_user_id, due_at, completed_at',
           )
           .eq('household_id', householdId)
+          .eq('status', 'scheduled')
           .order('due_at')
           .limit(100);
       await preferences.setString(cacheKey, jsonEncode(rows));
-    } catch (_) {
+    } catch (error) {
+      if (error is PostgrestException || error is AuthException) rethrow;
       final cached = preferences.getString(cacheKey);
       if (cached == null) rethrow;
       rows = jsonDecode(cached) as List;
