@@ -1,0 +1,75 @@
+name: Verify HomeDashboard
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  client:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npm run test:commits
+      - run: node tools/check-commit.mjs --last
+      - run: flutter pub get
+      - run: dart format --output=none --set-exit-if-changed lib test
+      - run: flutter analyze
+      - run: flutter test
+      - run: flutter build web --release --dart-define=SUPABASE_URL=http://localhost:54321 --dart-define=SUPABASE_PUBLISHABLE_KEY=ci-local-placeholder
+      - run: flutter build apk --debug
+  backend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: '2.118.0'
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      - run: deno check supabase/functions/*/index.ts
+      - run: supabase start --exclude studio,imgproxy,logflare,vector
+      - run: supabase db lint --level warning
+      - run: supabase test db
+      - if: always()
+        run: supabase stop
+  browser:
+    needs: [client, backend]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.5'
+          channel: stable
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: flutter pub get
+      - name: Start local web and wait for readiness
+        run: |
+          npm run local:web > /tmp/home-dashboard-web.log 2>&1 &
+          for attempt in $(seq 1 180); do
+            if curl -fs http://localhost:3000 > /dev/null; then break; fi
+            sleep 2
+          done
+          curl -fs http://localhost:3000 > /dev/null
+      - run: npm run test:web
+      - if: failure()
+        run: tail -100 /tmp/home-dashboard-web.log
+      - if: always()
+        run: npx --yes supabase@2.118.0 stop

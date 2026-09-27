@@ -1,0 +1,4 @@
+storeFile=/ABSOLUTE/PATH/TO/home-dashboard-release.jks
+storePassword=SET_LOCALLY
+keyAlias=home-dashboard
+keyPassword=SET_LOCALLY

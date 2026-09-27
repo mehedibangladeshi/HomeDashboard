@@ -24,11 +24,13 @@ follow [local development](docs/local-development.md). It provisions a real
 local Supabase backend and sample family accounts; Google and Firebase remain
 disabled. The phased production roadmap is in
 [implementation roadmap](docs/implementation-roadmap.md).
+Current verification evidence and outstanding release gates are recorded in
+[release status](docs/release-status.md).
 
 1. Install the Flutter stable SDK and Supabase CLI.
 2. Copy `.env.example` to `.env` and provide the public Supabase values.
-3. Start Supabase with `supabase start`, then apply migrations with
-   `supabase db reset`.
+3. Start Supabase with `supabase start`, then apply pending migrations with
+   `supabase db push --local`. Reset only deliberately disposable local data.
 4. Generate platform shells if they are absent: `flutter create .`.
 5. Install packages with `flutter pub get`.
 6. Run with `flutter run --dart-define-from-file=.env`.
@@ -57,6 +59,6 @@ and calendar schedules are in `supabase/functions/README.md`.
 
 ## Verification
 
-Run `flutter analyze`, `flutter test`, and `flutter build web --release`.
-Validate a clean database with `supabase db reset` followed by
-`supabase db lint --level warning` before deployment.
+Run the commands in [local development](docs/local-development.md), including
+database and real-browser checks. Database reset is not a deployment step;
+production uses forward migrations after staging acceptance.

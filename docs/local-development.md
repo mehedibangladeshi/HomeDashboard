@@ -53,6 +53,19 @@ npx --yes supabase@2.118.0 db lint --level warning
 npx --yes supabase@2.118.0 test db
 ```
 
+The real browser acceptance test requires the local web server running:
+
+```sh
+npm ci
+npx playwright install chromium
+npm run test:web
+```
+
+It signs in through Mailpit, saves a purchase, queues a purchase while offline,
+reloads to replay it, and creates/completes a chore. It leaves test records in
+the disposable local household. Screenshots are saved under ignored `.local/`.
+Do not hot-restart Flutter during the test.
+
 Use localhost consistently for browser auth; do not mix 127.0.0.1 and localhost
 in callback URLs. Phones must use a reachable LAN backend address; Android
 emulators use 10.0.2.2. The local launcher is web-only.

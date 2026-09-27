@@ -11,7 +11,7 @@ page.on('pageerror', error => errors.push(error.message));
 async function accessible() {
   const placeholder = page.locator('flt-semantics-placeholder');
   await placeholder.waitFor({ state: 'attached', timeout: 120000 });
-  await placeholder.click({ force: true });
+  await placeholder.dispatchEvent('click');
 }
 try {
   await page.goto('http://localhost:3000');
@@ -35,20 +35,54 @@ try {
   assert.ok(link, 'Supabase must send an actual sign-in email to local Mailpit');
   await page.goto(link);
   await accessible();
-  await page.getByRole('button', { name: 'Spending' }).click();
+  await page.getByRole('tab', { name: 'Spending' }).click();
   await page.getByRole('button', { name: 'Purchase' }).click();
   const summary = `Browser test groceries ${Date.now()}`;
-  await page.getByRole('textbox', { name: 'Amount (BDT)' }).fill('123.45');
-  await page.getByRole('textbox', { name: 'What did you buy?' }).fill(summary);
+  const amount = page.getByRole('textbox', { name: 'Amount (BDT)' });
+  await amount.click();
+  await amount.pressSequentially('123.45');
+  const item = page.getByRole('textbox', { name: 'What did you buy?' });
+  await item.click();
+  await item.pressSequentially(summary);
+  assert.equal(await item.inputValue(), summary);
   await page.getByRole('button', { name: 'Save purchase' }).click();
-  await page.getByText(summary, { exact: true }).waitFor({ timeout: 30000 });
+  await page.getByText(summary).first().waitFor({ timeout: 30000 });
+  await context.setOffline(true);
+  await page.getByRole('button', { name: 'Purchase' }).click();
+  const offlineSummary = `Offline browser groceries ${Date.now()}`;
+  const offlineAmount = page.getByRole('textbox', { name: 'Amount (BDT)' });
+  await offlineAmount.click();
+  await offlineAmount.pressSequentially('45.67');
+  const offlineItem = page.getByRole('textbox', { name: 'What did you buy?' });
+  await offlineItem.click();
+  await offlineItem.pressSequentially(offlineSummary);
+  await page.getByRole('button', { name: 'Save purchase' }).click();
+  await page.getByRole('button', { name: 'Purchase' }).waitFor();
+  await context.setOffline(false);
   await page.reload();
   await accessible();
-  await page.getByRole('button', { name: 'Spending' }).click();
-  await page.getByText(summary, { exact: true }).waitFor({ timeout: 30000 });
+  await page.getByRole('tab', { name: 'Spending' }).click();
+  await page.getByText(summary).first().waitFor({ timeout: 30000 });
+  await page.getByText(offlineSummary).first().waitFor({ timeout: 60000 });
+  await page.getByRole('tab', { name: 'Chores' }).click();
+  await page.getByRole('button', { name: 'Chore', exact: true }).click();
+  const choreSummary = `Browser chore ${Date.now()}`;
+  const choreTitle = page.getByRole('textbox', { name: 'What needs doing?' });
+  await choreTitle.click();
+  await choreTitle.pressSequentially(choreSummary);
+  await page.getByRole('button', { name: 'Add chore', exact: true }).click();
+  const checkbox = page.getByRole('checkbox', { name: new RegExp(choreSummary) });
+  await checkbox.waitFor({ timeout: 30000 });
+  await checkbox.click();
+  await checkbox.waitFor({ state: 'detached', timeout: 30000 });
+  await page.getByRole('tab', { name: 'Spending' }).click();
   await page.screenshot({ path: '.local/web-acceptance.png' });
   assert.deepEqual(errors, [], 'Browser should not produce uncaught errors');
-  console.log('PASS: local email login, expense creation, browser reload and persisted spending.');
+  console.log('PASS: email login, expense persistence, offline replay, chore creation and completion.');
+} catch (error) {
+  await page.screenshot({ path: '.local/web-failure.png' });
+  console.error(await page.locator('body').ariaSnapshot());
+  throw error;
 } finally {
   await browser.close();
 }
